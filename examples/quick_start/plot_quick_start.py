@@ -66,13 +66,13 @@ imgs
 # the dimension slider to compare channels 1 and 3 of round 1 (zero-based indexing),
 # you can already see which cells express mouse ACTB and which cells express human ACTB.
 #
-# .. code-block:: python
-#
-#   from starfish import display
-#
-#   %gui qt
-#   viewer = display(imgs)
-#   viewer.layers[0].name = "raw stack" # rename the layer
+from starfish import display
+from napari.utils.notebook_display import nbscreenshot
+
+%gui qt
+viewer = display(imgs)
+viewer.layers[0].name = "raw stack" # rename the layer
+nbscreenshot(viewer)
 
 ####################################################################################################
 # **View codebook**
