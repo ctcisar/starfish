@@ -68,7 +68,8 @@ imgs
 #
 from starfish import display
 
-%gui qt
+# %gui qt # <- uncomment for Jupyter notebook
+
 viewer = display(imgs)
 viewer.layers[0].name = "raw stack" # rename the layer
 
