@@ -107,8 +107,18 @@ def build_traces_nearest_neighbors(spot_results: SpotFindingResults, anchor_roun
     )
     return intensity_table
 
+
+def build_traces_colocalize():
+    """
+    Combine spots found across round and channels of an Imagestack using a _______
+    """
+    intenstiy_table = ""
+    return intensity_table
+
+
 TRACE_BUILDERS: Mapping[TraceBuildingStrategies, Callable] = {
     TraceBuildingStrategies.EXACT_MATCH: build_spot_traces_exact_match,
     TraceBuildingStrategies.NEAREST_NEIGHBOR: build_traces_nearest_neighbors,
     TraceBuildingStrategies.SEQUENTIAL: build_traces_sequential,
+    TraceBuildingStrategies.COLOCALIZE: build_traces_colocalize,
 }
