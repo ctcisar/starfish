@@ -108,10 +108,12 @@ def build_traces_nearest_neighbors(spot_results: SpotFindingResults, anchor_roun
     return intensity_table
 
 
-def build_traces_colocalize():
+def build_traces_colocalize(spot_results: SpotFindingResults, search_radius: int=3):
     """
     Combine spots found across round and channels of an Imagestack using a _______
     """
+    per_round_spot_results = _merge_spots_by_round(spot_results)
+    colocalized_spots = _identify_spots_within_radius(per_round_spot_results,seach_radius)
     intenstiy_table = ""
     return intensity_table
 
