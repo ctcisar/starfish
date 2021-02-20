@@ -25,6 +25,8 @@ class PerRoundMaxChannel(DecodeSpotsAlgorithm):
     trace_building_strategy: TraceBuildingStrategies
         Defines the strategy for building spot traces to decode across rounds and chs of spot
         finding results.
+    omittable_rounds : int
+        The number of rounds that can be omitted while still having unambiguous barcodes.
     search_radius : Optional[int]
         Only applicable if trace_building_strategy is TraceBuildingStrategies.NEAREST_NEIGHBORS.
         Number of pixels over which to search for spots in other rounds and channels.
@@ -38,10 +40,12 @@ class PerRoundMaxChannel(DecodeSpotsAlgorithm):
             self,
             codebook: Codebook,
             trace_building_strategy: TraceBuildingStrategies = TraceBuildingStrategies.EXACT_MATCH,
+            omittable_rounds: int=0,
             anchor_round: Optional[int]=1,
             search_radius: Optional[int]=3):
         self.codebook = codebook
         self.trace_builder: Callable = TRACE_BUILDERS[trace_building_strategy]
+        self.omittable_rounds = omittable_rounds
         self.anchor_round = anchor_round
         self.search_radius = search_radius
 
@@ -63,4 +67,4 @@ class PerRoundMaxChannel(DecodeSpotsAlgorithm):
                                          anchor_round=self.anchor_round,
                                          search_radius=self.search_radius)
         transfer_physical_coords_to_intensity_table(intensity_table=intensities, spots=spots)
-        return self.codebook.decode_per_round_max(intensities)
+        return self.codebook.decode_per_round_max(intensities, self.omittable_rounds)

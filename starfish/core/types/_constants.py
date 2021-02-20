@@ -72,6 +72,7 @@ class Features:
     SPOT_RADIUS = 'radius'
     DISTANCE = 'distance'
     PASSES_THRESHOLDS = 'passes_thresholds'
+    FILTER_TALLY = 'filter_tally'
     CELL_ID = 'cell_id'
     SPOT_ID = 'spot_id'
     INTENSITY = 'intensity'

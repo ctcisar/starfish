@@ -612,7 +612,7 @@ class Codebook(xr.DataArray):
             distances=(Features.AXIS, metric_outputs),
             passes_threshold=(Features.AXIS, passes_filters))
 
-    def decode_per_round_max(self, intensities: IntensityTable) -> DecodedIntensityTable:
+    def decode_per_round_max(self, intensities: IntensityTable, omittable_rounds: int = 0) -> DecodedIntensityTable:
         """
         Assigns intensity patterns that have been extracted from an :py:class:`ImageStack` and
         stored in an :py:class:`IntensityTable` by a :py:class:`SpotFinder` to the gene targets that
@@ -639,13 +639,16 @@ class Codebook(xr.DataArray):
         intensities : IntensityTable
             features to be decoded
 
+        omittable_rounds: int
+            the number of rounds that can be omitted while resolving barcodes unambiguously.
+
         Returns
         -------
         IntensityTable :
             intensity table containing additional data variables for target assignments
 
         """
-
+        
         def _view_row_as_element(array: np.ndarray) -> np.ndarray:
             """view an entire code as a single element
 
@@ -670,6 +673,60 @@ class Codebook(xr.DataArray):
                      'formats': ncols * [array.dtype]}
             return array.view(dtype)
 
+        def _permutations_excluding_n_elements(output_list: list, size: int, omit_count: int) -> list:
+            """generate all possible permutations that exclude a certain number of elements
+
+            used for creating possible codebook subsets when omittable_rounds > 0.
+
+            Parameters
+            ----------
+            output_list : list
+                list to be passed recurisively containing currently generated permutations
+            size : int
+                the number of items total in the set
+            omit_count : int
+                the number of items to be omitted, ie the number of 'False' entries in the array
+
+            Returns
+            -------
+            list :
+                a list containing all lists of length 'size' which have 'omit_count' False values
+
+            """
+            if omit_count > 0:
+                returner = []
+                returner.extend(_permutations_excluding_n_elements(output_list+[False], size, omit_count-1))
+                if(len(output_list)+omit_count < size): 
+                    # don't append false if there isn't enough room left
+                    returner.extend(_permutations_excluding_n_elements(output_list+[True], size, omit_count))
+                return returner
+            else:
+                while(len(output_list)<size):
+                    output_list.append(True)
+                return [output_list]
+
+        def _permutations_excluding_n_or_fewer_elements(size: int, omit_count: int) -> list:
+            """generate all possible permutations that exclude fewer than a number of elements
+
+            used for creating possible codebook subsets when omittable_rounds > 0
+
+            Parameters
+            ----------
+            size : int
+                the number of items in the set
+            omit_count : int
+                the upper bound of the number of items to be omitted
+
+            Returns
+            -------
+            list:
+                a list containing all lists of length 'size' which have 'omit_count' or fewer False values
+            """
+            all_perms = []
+            for i in range(omit_count+1):
+                all_perms.extend(_permutations_excluding_n_elements([],size,i))
+            return all_perms
+
         self._validate_decode_intensity_input_matches_codebook_shape(intensities)
 
         # add empty metadata fields and return
@@ -680,42 +737,91 @@ class Codebook(xr.DataArray):
                 distances=(Features.AXIS, np.empty(0, dtype=np.float64)),
                 passes_threshold=(Features.AXIS, np.empty(0, dtype=bool)))
 
-        intensities_without_nans = intensities.fillna(0)
-        max_channels = intensities_without_nans.argmax(Axes.CH.value)
-        # this snippet of code finds all the (feature, round) spots that have uniform illumination,
-        # and assigns them to a ch number that's one larger than max possible to ensure that such
-        # spots decode to `NaN`.
-        max_channels_max = intensities_without_nans.reduce(np.amax, Axes.CH.value)
-        max_channels_min = intensities_without_nans.reduce(np.amin, Axes.CH.value)
-        uniform_illumination_mask = (max_channels_max == max_channels_min).values
 
-        max_channels.values[uniform_illumination_mask] = intensities.sizes[Axes.CH.value]
-        codes = self.argmax(Axes.CH.value)
+        permutations = _permutations_excluding_n_or_fewer_elements(self.sizes[Axes.ROUND], omittable_rounds) 
+    
+        best_targets = {}
+        
+        for current_rounds in permutations:
+            
+            print(current_rounds) #FIXME delete before final
 
-        # TODO ambrosejcarr, dganguli: explore this quality score further
-        # calculate distance scores by evaluating the fraction of signal in each round that is
-        # found in the non-maximal channels.
-        max_intensities = intensities.max(Axes.CH.value)
-        round_intensities = intensities.sum(Axes.CH.value)
-        distance = 1 - (max_intensities / round_intensities).mean(Axes.ROUND.value)
+            intensities_without_nans = intensities.fillna(0)
 
-        a = _view_row_as_element(codes.values.reshape(self.shape[0], -1))
-        b = _view_row_as_element(max_channels.values.reshape(intensities.shape[0], -1))
+            # select the set of rounds we are looking at
+            intensities_without_nans = intensities_without_nans.sel(r=current_rounds)
 
-        targets = np.full(intensities.shape[0], fill_value=np.nan, dtype=object)
+            max_channels = intensities_without_nans.argmax(Axes.CH.value)
+            # this snippet of code finds all the (feature, round) spots that have uniform illumination,
+            # and assigns them to a ch number that's one larger than max possible to ensure that such
+            # spots decode to `NaN`.
+            max_channels_max = intensities_without_nans.reduce(np.amax, Axes.CH.value)
+            max_channels_min = intensities_without_nans.reduce(np.amin, Axes.CH.value)
+            uniform_illumination_mask = (max_channels_max == max_channels_min).values
 
-        # decode the intensities
-        for i in np.arange(codes.shape[0]):
-            targets[np.where(a[i] == b)[0]] = codes[Features.TARGET][i]
+            max_channels.values[uniform_illumination_mask] = intensities_without_nans.sizes[Axes.CH.value]
+            
+            codes = self.argmax(Axes.CH.value)
+            current_codes = codes.sel(r=current_rounds) 
+            current_codes.values = np.ascontiguousarray(current_codes.values)
 
-        # a code passes filters if it decodes successfully
-        passes_filters = ~pd.isnull(targets)
+            # TODO ambrosejcarr, dganguli: explore this quality score further
+            # calculate distance scores by evaluating the fraction of signal in each round that is
+            # found in the non-maximal channels.
+            max_intensities = intensities_without_nans.max(Axes.CH.value)
+            round_intensities = intensities_without_nans.sum(Axes.CH.value)
+            distance = 1 - (max_intensities / round_intensities).mean(Axes.ROUND.value)
+
+            a = _view_row_as_element(current_codes.values.reshape(current_codes.shape[0], -1))
+            b = _view_row_as_element(max_channels.values.reshape(intensities.shape[0], -1))
+
+            targets = np.full(intensities_without_nans.shape[0], fill_value=np.nan, dtype=object)
+
+            # decode the intensities
+            for i in np.arange(current_codes.shape[0]):
+                targets[np.where(a[i] == b)[0]] = current_codes[Features.TARGET][i]
+
+            # a code passes filters if it decodes successfully
+            passes_filters = ~pd.isnull(targets)
+
+            # we want to prioritize decoded targets that match more rounds
+            round_tally = sum(current_rounds)
+
+            # saving results from this permutation, if they are better than what we have saved
+            if best_targets == {}: # first result is always [true] * len
+                rounds_found = round_tally * passes_filters
+                best_targets = {"intensities":intensities,
+                                "targets":targets,
+                                "distance":distance,
+                                "passes_filters":passes_filters,
+                                "rounds_found":rounds_found}
+            else:
+                print("finding best answers..") #FIXME delete before final
+                total_replaced = 0 #FIXME delete before final
+                current_ind = 0
+                for i in range(len(best_targets["intensities"])):
+                    # we want to pass over any items that are in the best targets that are excluded in the current set
+                    if (best_targets["intensities"][i] == intensities[current_ind]).all():
+                        if passes_filters[i]: # this target is a candidate if it passes
+                            # if previous decode at this loc didn't pass or used less rounds, this is better.
+                            # or if previous decode used the same number of rounds, but had a larger distance.
+                            if not best_targets['passes_filters'][i] or best_targets["rounds_found"][i] < round_tally or (best_targets["rounds_found"][i] == round_tally and distance.values[current_ind] < best_targets["distance"].values[i]):
+                                best_targets["targets"][i] = targets[current_ind]
+                                best_targets["distance"].values[i] = distance.values[current_ind]
+                                best_targets["passes_filters"][i] = True
+                                best_targets["rounds_found"][i] = round_tally
+                                total_replaced += 1 #FIXME delete before final
+                        current_ind += 1 #assuming that things have not gotten reordered, 
+                        # we only advance in the current subset if this wasn't a skipped item.
+                print("made {} replacements".format(total_replaced)) #FIXME delete before final
+       
 
         return DecodedIntensityTable.from_intensity_table(
-            intensities,
-            targets=(Features.AXIS, targets.astype('U')),
-            distances=(Features.AXIS, distance),
-            passes_threshold=(Features.AXIS, passes_filters))
+           best_targets["intensities"],
+           targets=(Features.AXIS, best_targets["targets"].astype('U')),
+            distances=(Features.AXIS, best_targets["distance"]),
+            passes_threshold=(Features.AXIS, best_targets["passes_filters"]),
+            filter_tally=(Features.AXIS, best_targets["rounds_found"]))
 
     @classmethod
     def synthetic_one_hot_codebook(
