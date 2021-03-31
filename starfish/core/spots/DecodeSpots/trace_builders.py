@@ -10,7 +10,7 @@ from starfish.core.types import (
     SpotFindingResults,
     TraceBuildingStrategies
 )
-from .util import _build_intensity_table, _match_spots, _merge_spots_by_round
+from .util import _build_intensity_table, _match_spots, _merge_spots_by_round, _identify_spots_within_radius
 
 
 def build_spot_traces_exact_match(spot_results: SpotFindingResults, **kwargs) -> IntensityTable:
@@ -108,13 +108,19 @@ def build_traces_nearest_neighbors(spot_results: SpotFindingResults, anchor_roun
     return intensity_table
 
 
-def build_traces_colocalize(spot_results: SpotFindingResults, search_radius: int=3):
+def build_traces_colocalize(spot_results: SpotFindingResults, anchor_round: int=0, search_radius: int=3):
     """
     Combine spots found across round and channels of an Imagestack using a _______
     """
     per_round_spot_results = _merge_spots_by_round(spot_results)
-    colocalized_spots = _identify_spots_within_radius(per_round_spot_results,seach_radius)
-    intenstiy_table = ""
+    distances, indices = _identify_spots_within_radius(per_round_spot_results,anchor_round,search_radius)
+    intenstiy_table = _build_intensity_table(
+        per_round_spot_results, distances, indices,
+        rounds=spot_results.round_labels,
+        channels=spot_results.ch_labels,
+        search_radius=search_radius,
+        anchor_round=anchor_round
+    )
     return intensity_table
 
 

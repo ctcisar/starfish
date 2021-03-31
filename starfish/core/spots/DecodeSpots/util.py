@@ -8,6 +8,7 @@ from sklearn.neighbors import NearestNeighbors
 from starfish.core.intensity_table.intensity_table import IntensityTable
 from starfish.core.types import Axes, Features, SpotFindingResults
 
+from math import sqrt
 
 def _match_spots(
     round_dataframes: Dict[int, pd.DataFrame], anchor_round: int
@@ -55,6 +56,40 @@ def _match_spots(
 
     return dist, ind
 
+def _identify_spots_within_radius(
+        round_dataframes: Dict[int, pd.DataFrame], anchor_round: int, search_radius:int
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    reference_df = round_dataframes[anchor_round]
+    reference_coordinates = reference_df[[Axes.ZPLANE, Axes.Y, Axes.X]]
+
+    dist = pd.DataFrame(
+            data=np.zeros((reference_df.shape[0], len(round_dataframes)), dtype=float),
+            columns=list(round_dataframes.keys())
+    )
+    ind = pd.DataFrame(
+            data=np.zeros((reference_df.shape[0], len(round_dataframes)), dtype=np.int32),
+            columns=list(round_dataframes.keys())
+    )
+
+    # fill data for anchor round; every spot is a perfect match to itself.
+    ind[anchor_round] = np.arange(reference_df.shape[0], dtype=np.int32)
+
+    for r in sorted(set(round_dataframes.keys()) - {anchor_round, }):
+        query_df = round_dataframes[r]
+        alldist = query_df.apply(lambda x: _compare_row_to_ref(x,reference_df), axis=1)
+        print(alldist)
+        # get the argmin and min, stuff those in vectors, set those to this row in dist and ind
+        dist[r] = alldist.apply(pd.min, axis=1)
+        ind[r] = alldist.apply(pd.argmin, axis=1)
+
+    return dist, ind
+
+def _compare_row_to_ref(
+        row: pd.DataFrame, ref: pd.DataFrame
+) -> pd.DataFrame:
+    """returns a dataframe of ref dimensions comparing the distance from row to each item in ref
+    """
+    return  ref.apply(lambda x: sqrt((x['x']-row['x'])**2 + (x['y']-row['y'])**2), axis=1)
 
 def _build_intensity_table(
     round_dataframes: Dict[int, pd.DataFrame],
